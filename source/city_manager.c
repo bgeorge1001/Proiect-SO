@@ -1,4 +1,4 @@
-#include "../biblioteci/command.h"
+#include "../biblioteci/comenzi.h"
 
 
 int main(int argc, char **argv) {
