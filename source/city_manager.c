@@ -1,5 +1,5 @@
-#include "../include/command.h"
-#include "../include/sanitization.h"
+#include "../biblioteci/command.h"
+
 
 int main(int argc, char **argv) {
   if (argc < 6) {
