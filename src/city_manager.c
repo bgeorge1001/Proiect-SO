@@ -13,6 +13,7 @@
 #define MAX_CAT_LEN 30
 #define MAX_DESC_LEN 256
 
+
 typedef struct {
     int report_id;
     char inspector_name[MAX_NAME_LEN];
@@ -345,8 +346,91 @@ void update_threshold(const char *district, const char *role, const char *value_
     close(fd);
 }
 
+
+/**
+ * Parses a string of type "field:operator:value"
+ * Returns 1 for success, 0 for invalid format.
+ */
+int parse_condition(const char *input, char *field, char *op, char *value) {
+    // Find the first occurrence of the ':' character
+    const char *first_colon = strchr(input, ':');
+    if (first_colon == NULL) {
+        return 0; // First separator is missing
+    }
+
+    // Find the second occurrence of ':' starting after the first one
+    const char *second_colon = strchr(first_colon + 1, ':');
+    if (second_colon == NULL) {
+        return 0; // Second separator is missing
+    }
+
+    // Ensure there isn't a third ':' (the requirement expects exactly two)
+    if (strchr(second_colon + 1, ':') != NULL) {
+        return 0; // Too many separators
+    }
+
+    // Extract 'field' (everything before the first ':')
+    size_t field_len = first_colon - input;
+    strncpy(field, input, field_len);
+    field[field_len] = '\0';
+
+    // Extract 'op' (everything between the two ':' characters)
+    size_t op_len = second_colon - (first_colon + 1);
+    strncpy(op, first_colon + 1, op_len);
+    op[op_len] = '\0';
+
+    // Extract 'value' (everything after the second ':')
+    strcpy(value, second_colon + 1);
+
+    // Verify that none of the fields are empty (e.g., "field::value")
+    if (strlen(field) == 0 || strlen(op) == 0 || strlen(value) == 0) {
+        return 0;
+    }
+
+    return 1; // Success
+}
+
+/**
+ * Checks if the report 'r' meets the condition defined by field, op, and value.
+ * Returns 1 for true, 0 for false.
+ */
+int match_condition(Report *r, const char *field, const char *op, const char *value) {
+    
+    // --- 1. Filtering by CATEGORY (String) ---
+    if (strcmp(field, "category") == 0) {
+        if (strcmp(op, "==") == 0) {
+            return (strcmp(r->category, value) == 0);
+        } else if (strcmp(op, "!=") == 0) {
+            return (strcmp(r->category, value) != 0);
+        }
+    }
+
+    // --- 2. Filtering by NUMERIC fields ---
+    else if (strcmp(field, "severity") == 0 || strcmp(field, "report_id") == 0) {
+        int val_r; // Value from the report structure
+        int val_cmp = atoi(value); // Target value (converted from string to int)
+
+        if (strcmp(field, "severity") == 0) {
+            val_r = r->severity;
+        } else {
+            val_r = r->report_id;
+        }
+
+        // Apply the corresponding operator
+        if (strcmp(op, "==") == 0) return val_r == val_cmp;
+        if (strcmp(op, "!=") == 0) return val_r != val_cmp;
+        if (strcmp(op, "<") == 0)  return val_r < val_cmp;
+        if (strcmp(op, ">") == 0)  return val_r > val_cmp;
+        if (strcmp(op, "<=") == 0) return val_r <= val_cmp;
+        if (strcmp(op, ">=") == 0) return val_r >= val_cmp;
+    }
+
+    // If we reach here, the field or operator is not supported
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
-    // Variabile pentru a stoca datele primite
+    // variabile pentru a stoca datele primite
     char *role = NULL;
     char *user = NULL;
     char *command = NULL;
@@ -358,7 +442,7 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--role") == 0 && i + 1 < argc) {
             role = argv[i + 1];
-            i++; // Sarim peste valoare ca sa nu o citim ca pe o comanda
+            i++; // sarim peste valoare ca sa nu o citim ca pe o comanda
         } 
         else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
             user = argv[i + 1];
@@ -378,7 +462,7 @@ int main(int argc, char *argv[]) {
             command = "remove_report";
             district = argv[i + 1];
             report_id_str = argv[i + 2];
-            i += 2; // Aici sarim 2 pasi, deoarece avem district si ID
+            i += 2; // aici sarim 2 pasi, deoarece avem district si ID
         }
         else if (strcmp(argv[i], "--view") == 0 && i + 2 < argc) {
             command = "view";
@@ -389,12 +473,10 @@ int main(int argc, char *argv[]) {
         else if (strcmp(argv[i], "--update_threshold") == 0 && i + 2 < argc) {
             command = "update_threshold";
             district = argv[i + 1];
-            // Folosim o variabilă nouă sau refolosim una existentă.
-            // Să zicem că ai definit "char *target_val_str = NULL;" la începutul lui main:
             target_val_str = argv[i + 2]; 
             i += 2;
         }
-        // Poti adauga restul comenzilor (view, update_threshold, filter) folosind acelasi sablon
+      
     }
 
     
@@ -448,6 +530,41 @@ int main(int argc, char *argv[]) {
             char action_msg[256];
             snprintf(action_msg, sizeof(action_msg), "A actualizat pragul la %s.", target_val_str);
             log_action(district, role, user, action_msg);
+        }
+    }
+    else if (strcmp(command, "filter") == 0) {
+        char field[50], op[5], val[100];
+        if (parse_condition(filter_cond, field, op, val)) {
+            
+            char filepath[256];
+            snprintf(filepath, sizeof(filepath), "%s/reports.dat", district);
+
+            int fd = open(filepath, O_RDONLY);
+            if (fd == -1) {
+                perror("Eroare la deschiderea fisierului pentru filtrare");
+            } else {
+                Report r;
+                int found = 0;
+                printf("--- REZULTATE FILTRARE (%s %s %s) ---\n", field, op, val);
+                while (read(fd, &r, sizeof(Report)) == sizeof(Report)) { 
+                    if (match_condition(&r, field, op, val)) {
+                        printf("[ID: %d] %s | Severitate: %d | Descriere: %s\n", 
+                                r.report_id, r.category, r.severity, r.description);
+                        found++;
+                    }
+                }
+                if (found == 0) {
+                    printf("Nu s-au gasit rapoarte care sa corespunda filtrului.\n");
+                }
+                close(fd);
+            }
+            char action_msg[256];
+            snprintf(action_msg, sizeof(action_msg), "A filtrat rapoartele dupa: %s", filter_cond);
+            log_action(district, role, user, action_msg);
+
+        } else {
+            printf("Eroare: Formatul conditiei este invalid! Folositi camp:operator:valoare\n");
+            printf("Exemplu: --filter severity:>=:2\n");
         }
     }
     return 0;
