@@ -429,6 +429,20 @@ int match_condition(Report *r, const char *field, const char *op, const char *va
     return 0;
 }
 
+/*void remove_district(const char* district, const char *role){
+        if (strcmp(role, "manager") != 0) {
+        printf("Eroare de securitate: Doar utilizatorii cu rol de 'manager' pot sterge district-uri!\n");
+        return;
+    }
+    pid_t p = fork();
+    if (p < 0){
+        printf("Eroare la functia fork() !");
+        return;
+    }
+
+    //rm -rf ./downtown - comanda care trebuie sa iasa din aceasta functie
+}*/
+
 int main(int argc, char *argv[]) {
     // variabile pentru a stoca datele primite
     char *role = NULL;
@@ -475,6 +489,12 @@ int main(int argc, char *argv[]) {
             district = argv[i + 1];
             target_val_str = argv[i + 2]; 
             i += 2;
+        }
+        else if (strcmp(argv[i], "--remove_district") == 0 && i + 2 < argc){
+            printf("ajunge aici");
+            command = "remove_district";
+            district = argv[i + 1];
+            i += 1;
         }
       
     }
@@ -567,5 +587,13 @@ int main(int argc, char *argv[]) {
             printf("Exemplu: --filter severity:>=:2\n");
         }
     }
+    /*else if (strcmp(command, "remove_district") == 0){
+        if (district == NULL){
+            printf("Eroare: District-ul necesita un nume ! ");
+        }
+        else{
+            remove_district(district,role);
+        }
+    }*/
     return 0;
 }
