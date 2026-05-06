@@ -248,9 +248,9 @@ void check_symlinks() {
                 if (S_ISLNK(link_stat.st_mode)) {       
                     if (stat(entry->d_name, &target_stat) == -1) {
                         printf("WARNING: Dangling link detectat -> '%s' (fisiertul tinta a fost sters sau mutat!)\n", entry->d_name);       
-                        // putem sterge, folosind comanda : 
-                        // unlink(entry->d_name); 
-                        // printf("Linkul dangling a fost sters automat.\n");
+                       
+                        unlink(entry->d_name); 
+                        printf("Linkul dangling a fost sters automat.\n");
                     } else {
                         printf("OK: Linkul '%s' este valid.\n", entry->d_name);
                     }
@@ -265,44 +265,24 @@ void check_symlinks() {
 void log_action(const char *district, const char *role, const char *user, const char *action) {
     char filepath[256];
     snprintf(filepath, sizeof(filepath), "%s/logged_district", district);
-
     struct stat file_stat;
-    if (stat(filepath, &file_stat) == -1) {
-        return; 
-    }
+    if (stat(filepath, &file_stat) == -1) return; 
 
     int can_write = 0;
-    
-    if (strcmp(role, "manager") == 0) {
-        // Managerii sunt "Owner". Verificăm bitul de Write pentru Owner (S_IWUSR)
-        if (file_stat.st_mode & S_IWUSR) {
-            can_write = 1;
-        }
-    } else if (strcmp(role, "inspector") == 0) {
-        // Inspectorii sunt "Group". Verificăm bitul de Write pentru Group (S_IWGRP)
-        if (file_stat.st_mode & S_IWGRP) {
-            can_write = 1;
-        }
-    }
+    if (strcmp(role, "manager") == 0 && (file_stat.st_mode & S_IWUSR)) can_write = 1;
+    else if (strcmp(role, "inspector") == 0 && (file_stat.st_mode & S_IWGRP)) can_write = 1;
 
     if (!can_write) {
-        printf("Restrictie sistem: Acces refuzat! Rolul '%s' nu are permisiunea de scriere in %s.\n", role, filepath);
-        return; 
-    }
-
-    int fd = open(filepath, O_WRONLY | O_APPEND);
-    if (fd == -1) {
-        perror("Eroare la deschiderea jurnalului pentru scriere");
+        printf("Security Restriction: Access denied to %s\n", filepath);
         return;
     }
 
+    int fd = open(filepath, O_WRONLY | O_APPEND);
+    if (fd == -1) return;
     time_t now = time(NULL);
-    char time_str[26];
-    strncpy(time_str, ctime(&now), sizeof(time_str));
-    time_str[strcspn(time_str, "\n")] = 0;
     char log_entry[512];
-    snprintf(log_entry, sizeof(log_entry), "[%s] Rol: %s, User: %s, Actiune: %s\n", 
-             time_str, role, user, action);
+    snprintf(log_entry, sizeof(log_entry), "%ld\t%s\t%s\t%s\n", 
+             (long)now, user, role, action);
 
     write(fd, log_entry, strlen(log_entry));
     close(fd);
@@ -429,19 +409,38 @@ int match_condition(Report *r, const char *field, const char *op, const char *va
     return 0;
 }
 
-/*void remove_district(const char* district, const char *role){
-        if (strcmp(role, "manager") != 0) {
-        printf("Eroare de securitate: Doar utilizatorii cu rol de 'manager' pot sterge district-uri!\n");
-        return;
-    }
-    pid_t p = fork();
-    if (p < 0){
-        printf("Eroare la functia fork() !");
+void remove_district(const char *district, const char *role) {
+    if (strcmp(role, "manager") != 0) {
+        printf("Eroare de securitate: Doar managerii pot sterge un district!\n");
         return;
     }
 
-    //rm -rf ./downtown - comanda care trebuie sa iasa din aceasta functie
-}*/
+    pid_t pid = fork(); 
+
+    if (pid < 0) {
+        perror("Eroare la fork");
+        return;
+    } else if (pid == 0) {
+        execlp("rm", "rm", "-rf", district, NULL);
+        
+        perror("Eroare la executarea rm");
+        exit(EXIT_FAILURE);
+    } else {
+        
+        int status;
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
+            char symlink_path[256];
+            snprintf(symlink_path, sizeof(symlink_path), "active_reports-%s", district);
+            unlink(symlink_path);
+            
+            printf("Districtul '%s' a fost sters cu succes.\n", district);
+        } else {
+            printf("Eroare: Nu s-a putut sterge districtul.\n");
+        }
+    }
+}
 
 int main(int argc, char *argv[]) {
     // variabile pentru a stoca datele primite
@@ -490,8 +489,7 @@ int main(int argc, char *argv[]) {
             target_val_str = argv[i + 2]; 
             i += 2;
         }
-        else if (strcmp(argv[i], "--remove_district") == 0 && i + 2 < argc){
-            printf("ajunge aici");
+        else if (strcmp(argv[i], "--remove_district") == 0 && i + 1 < argc) {
             command = "remove_district";
             district = argv[i + 1];
             i += 1;
@@ -587,13 +585,8 @@ int main(int argc, char *argv[]) {
             printf("Exemplu: --filter severity:>=:2\n");
         }
     }
-    /*else if (strcmp(command, "remove_district") == 0){
-        if (district == NULL){
-            printf("Eroare: District-ul necesita un nume ! ");
-        }
-        else{
-            remove_district(district,role);
-        }
-    }*/
+    else if (strcmp(command, "remove_district") == 0) {
+        remove_district(district, role);
+    }
     return 0;
 }
