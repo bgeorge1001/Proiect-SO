@@ -4,10 +4,12 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <dirent.h>
+#include <signal.h>
 
 #define MAX_NAME_LEN 50
 #define MAX_CAT_LEN 30
@@ -75,14 +77,33 @@ void add_report(const char *district, const char *user) {
     int new_id = file_size / sizeof(Report); 
     Report new_report;
     memset(&new_report, 0, sizeof(Report)); 
+    
     new_report.report_id = new_id;
     strncpy(new_report.inspector_name, user, MAX_NAME_LEN - 1); 
     new_report.timestamp = time(NULL); 
-    new_report.latitude = 47.05; 
-    new_report.longitude = 21.93;
-    strncpy(new_report.category, "road", MAX_CAT_LEN - 1); 
-    new_report.severity = 2;
-    strncpy(new_report.description, "Groapa periculoasa pe banda 2", MAX_DESC_LEN - 1); 
+
+   
+    printf("\n--- ADAUGARE RAPORT NOU ---\n");
+    
+    printf("Introduceti latitudinea (ex: 47.05): ");
+    scanf("%f", &new_report.latitude);
+
+    printf("Introduceti longitudinea (ex: 21.93): ");
+    scanf("%f", &new_report.longitude);
+
+    printf("Introduceti severitatea (1=minor, 2=moderat, 3=critic): ");
+    scanf("%d", &new_report.severity);
+
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+
+    printf("Introduceti categoria (ex: road, water, etc.): ");
+    fgets(new_report.category, MAX_CAT_LEN, stdin);
+    new_report.category[strcspn(new_report.category, "\n")] = 0; 
+
+    printf("Introduceti o scurta descriere: ");
+    fgets(new_report.description, MAX_DESC_LEN, stdin);
+    new_report.description[strcspn(new_report.description, "\n")] = 0; 
 
     ssize_t bytes_written = write(fd, &new_report, sizeof(Report));
     if (bytes_written != sizeof(Report)) {
@@ -92,6 +113,7 @@ void add_report(const char *district, const char *user) {
     }
 
     close(fd);
+ 
 }
 
 // functie pentru a converti st_mode intr-un string de tip "rwxr-xr--"
@@ -513,8 +535,26 @@ int main(int argc, char *argv[]) {
 
     if (strcmp(command, "add") == 0) {
         init_district(district); 
-        add_report(district,user); 
-        log_action(district, role, user, "A adaugat un raport nou.");
+        add_report(district, user); 
+        
+       
+        int fd_pid = open(".monitor_pid", O_RDONLY);
+        if (fd_pid != -1) {
+            char pid_buf[32] = {0};
+            read(fd_pid, pid_buf, sizeof(pid_buf) - 1);
+            close(fd_pid);
+
+            pid_t monitor_pid = atoi(pid_buf);
+            
+        
+            if (monitor_pid > 0 && kill(monitor_pid, SIGUSR1) == 0) {
+                log_action(district, role, user, "A adaugat un raport. Succes: Monitorul a fost notificat.");
+            } else {
+                log_action(district, role, user, "A adaugat un raport. Eroare: Monitorul nu a putut fi informat (semnal esuat).");
+            }
+        } else {
+            log_action(district, role, user, "A adaugat un raport. Eroare: .monitor_pid lipseste, monitorul nu a putut fi informat.");
+        }
     } 
     else if (strcmp(command, "list") == 0) {
         list_reports(district);
